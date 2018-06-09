@@ -208,6 +208,7 @@ class PrinterMultiStepper(PrinterHomingStepper):
         self.endstops = PrinterHomingStepper.get_endstops(self)
         self.extras = []
         self.all_step_const = [self.step_const]
+        self.all_step_itersolve = [self.step_itersolve]
         for i in range(1, 99):
             if not config.has_section(config.get_name() + str(i)):
                 break
@@ -215,6 +216,7 @@ class PrinterMultiStepper(PrinterHomingStepper):
             extra = PrinterStepper(printer, extraconfig)
             self.extras.append(extra)
             self.all_step_const.append(extra.step_const)
+            self.all_step_itersolve.append(extra.step_itersolve)
             extraendstop = extraconfig.get('endstop_pin', None)
             if extraendstop is not None:
                 ppins = printer.lookup_object('pins')
@@ -223,10 +225,12 @@ class PrinterMultiStepper(PrinterHomingStepper):
                 self.endstops.append((mcu_endstop, extra.name))
             else:
                 self.mcu_endstop.add_stepper(extra.mcu_stepper)
-        self.step_const = self.step_multi_const
-    def step_multi_const(self, print_time, start_pos, dist, start_v, accel):
+    def step_const(self, print_time, start_pos, dist, start_v, accel):
         for step_const in self.all_step_const:
             step_const(print_time, start_pos, dist, start_v, accel)
+    def step_itersolve(self, print_time, start_pos, dist, start_v, accel):
+        for step_itersolve in self.all_step_itersolve:
+            step_itersolve(print_time, start_pos, dist, start_v, accel)
     def set_max_jerk(self, max_halt_velocity, max_accel):
         PrinterHomingStepper.set_max_jerk(self, max_halt_velocity, max_accel)
         for extra in self.extras:
