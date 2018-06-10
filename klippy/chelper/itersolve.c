@@ -105,20 +105,19 @@ itersolve_find_step(struct stepper_kinematics *sk, struct move *m
     struct timepos best_guess = high;
     low.position -= target;
     high.position -= target;
+    if (!high.position)
+        return best_guess;
     int high_sign = signbit(high.position);
+    if (high_sign == signbit(low.position))
+        return (struct timepos){ low.time, target };
     for (;;) {
-        double range_delta = high.position - low.position;
-        if (!range_delta)
-            break;
         double guess_time = ((low.time*high.position - high.time*low.position)
-                             / range_delta);
+                             / (high.position - low.position));
         if (fabs(guess_time - best_guess.time) <= .000000001)
             break;
         best_guess.time = guess_time;
         best_guess.position = calc_position(sk, m, guess_time);
         double guess_position = best_guess.position - target;
-        if (!guess_position)
-            break;
         int guess_sign = signbit(guess_position);
         if (guess_sign == high_sign) {
             high.time = guess_time;
@@ -140,13 +139,13 @@ itersolve_gen_steps(struct stepper_kinematics *sk, struct move *m)
     double mcu_freq = stepcompress_get_mcu_freq(sc);
     struct timepos last = { 0., sk->commanded_pos }, low = last, high = last;
     double seek_time_delta = 0.000100;
-    int sdir = stepcompress_get_step_dir(sc);
-    int steps = 0;
+    int steps = 0, sdir = stepcompress_get_step_dir(sc);
     struct queue_append qa = queue_append_start(sc, m->print_time, .5);
     for (;;) {
         // Determine if next step is in forward or reverse direction
         double dist = high.position - last.position;
-        if (high.time <= low.time || fabs(dist) < half_step) {
+        if (fabs(dist) < half_step) {
+        seek_new_high_range:
             if (high.time >= m->move_t)
                 // At end of move
                 break;
@@ -160,7 +159,17 @@ itersolve_gen_steps(struct stepper_kinematics *sk, struct move *m)
             continue;
         }
         int next_sdir = dist > 0.;
-        if (next_sdir != sdir) {
+        if (unlikely(next_sdir != sdir)) {
+            // Direction change
+            if (fabs(dist) < half_step + .000000001)
+                // Only change direction if going past midway point
+                goto seek_new_high_range;
+            if (low.time <= last.time) {
+                // Must reset "low" range to avoid finding same position
+                high.time = (last.time + high.time) * .5;
+                high.position = calc_position(sk, m, high.time);
+                continue;
+            }
             int ret = queue_append_set_next_step_dir(&qa, next_sdir);
             if (ret)
                 return ret;
@@ -180,6 +189,9 @@ itersolve_gen_steps(struct stepper_kinematics *sk, struct move *m)
         last.position = target + (sdir ? half_step : -half_step);
         last.time = next.time;
         low = next;
+        if (last.time >= high.time)
+            // The high range is no longer valid - recalculate it
+            goto seek_new_high_range;
     }
     queue_append_finish(qa);
     sk->commanded_pos = last.position;
