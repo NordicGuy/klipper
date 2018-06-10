@@ -91,35 +91,72 @@ move_get_coord(struct move *m, double move_time)
  * Iterative solver
  ****************************************************************/
 
+struct timepos {
+    double time, position;
+};
+
+// Find step using "false position" method
+static struct timepos
+itersolve_find_step(struct stepper_kinematics *sk, struct move *m
+                    , struct timepos low, struct timepos high
+                    , double target)
+{
+    sk_callback calc_position = sk->calc_position;
+    struct timepos best_guess = high;
+    low.position -= target;
+    high.position -= target;
+    int high_sign = signbit(high.position);
+    for (;;) {
+        double range_delta = high.position - low.position;
+        if (!range_delta)
+            break;
+        double guess_time = ((low.time*high.position - high.time*low.position)
+                             / range_delta);
+        if (fabs(guess_time - best_guess.time) <= .000000001)
+            break;
+        best_guess.time = guess_time;
+        best_guess.position = calc_position(sk, m, guess_time);
+        double guess_position = best_guess.position - target;
+        if (!guess_position)
+            break;
+        int guess_sign = signbit(guess_position);
+        if (guess_sign == high_sign) {
+            high.time = guess_time;
+            high.position = guess_position;
+        } else {
+            low.time = guess_time;
+            low.position = guess_position;
+        }
+    }
+    return best_guess;
+}
+
 int32_t __visible
 itersolve_gen_steps(struct stepper_kinematics *sk, struct move *m)
 {
     struct stepcompress *sc = sk->sc;
     sk_callback calc_position = sk->calc_position;
-    double half_step_dist = .5 * sk->step_dist;
+    double half_step = .5 * sk->step_dist;
     double mcu_freq = stepcompress_get_mcu_freq(sc);
-    double last_pos = sk->commanded_pos;
-    double low_guess_pos = last_pos, high_guess_pos = last_pos;
-    double last_time = 0., low_guess_time = 0., high_guess_time = 0.;
+    struct timepos last = { 0., sk->commanded_pos }, low = last, high = last;
     double seek_time_delta = 0.000100;
     int sdir = stepcompress_get_step_dir(sc);
     int steps = 0;
     struct queue_append qa = queue_append_start(sc, m->print_time, .5);
     for (;;) {
         // Determine if next step is in forward or reverse direction
-        double dist = high_guess_pos - last_pos;
-        if (high_guess_time <= low_guess_time || fabs(dist) < half_step_dist) {
-            if (high_guess_time >= m->move_t)
+        double dist = high.position - last.position;
+        if (high.time <= low.time || fabs(dist) < half_step) {
+            if (high.time >= m->move_t)
                 // At end of move
                 break;
-            // Need to increase high_guess_time
-            low_guess_time = high_guess_time;
-            low_guess_pos = high_guess_pos;
-            high_guess_time = last_time + seek_time_delta;
+            // Need to increase next step search range
+            low = high;
+            high.time = last.time + seek_time_delta;
             seek_time_delta += seek_time_delta;
-            if (high_guess_time > m->move_t)
-                high_guess_time = m->move_t;
-            high_guess_pos = calc_position(sk, m, high_guess_time);
+            if (high.time > m->move_t)
+                high.time = m->move_t;
+            high.position = calc_position(sk, m, high.time);
             continue;
         }
         int next_sdir = dist > 0.;
@@ -129,51 +166,23 @@ itersolve_gen_steps(struct stepper_kinematics *sk, struct move *m)
                 return ret;
             sdir = next_sdir;
         }
-        // Find step using "false position" method
-        double target = last_pos + (sdir ? half_step_dist : -half_step_dist);
-        double min_guess_time = low_guess_time;
-        double min_guess_dpos = low_guess_pos - target;
-        double max_guess_time = high_guess_time, guess_time = high_guess_time;
-        double max_guess_dpos = high_guess_pos - target;
-        double guess_pos = high_guess_pos;
-        int max_guess_sign = signbit(max_guess_dpos);
-        for (;;) {
-            double minmax_delta = max_guess_dpos - min_guess_dpos;
-            if (!minmax_delta)
-                break;
-            double next_guess_time = ((min_guess_time*max_guess_dpos
-                                       - max_guess_time*min_guess_dpos)
-                                      / minmax_delta);
-            if (fabs(next_guess_time - guess_time) <= .000000001)
-                break;
-            guess_time = next_guess_time;
-            guess_pos = calc_position(sk, m, guess_time);
-            double guess_dpos = guess_pos - target;
-            if (!guess_dpos)
-                break;
-            int guess_sign = signbit(guess_dpos);
-            if (guess_sign == max_guess_sign) {
-                max_guess_time = guess_time;
-                max_guess_dpos = guess_dpos;
-            } else {
-                min_guess_time = guess_time;
-                min_guess_dpos = guess_dpos;
-            }
-        }
+        // Find step
+        double target = last.position + (sdir ? half_step : -half_step);
+        struct timepos next = itersolve_find_step(sk, m, low, high, target);
         // Add step at given time
-        int ret = queue_append(&qa, guess_time * mcu_freq);
+        int ret = queue_append(&qa, next.time * mcu_freq);
         if (ret)
             return ret;
-        last_pos = sdir ? target + half_step_dist : target - half_step_dist;
         steps += sdir ? 1 : -1;
-        low_guess_pos = guess_pos;
-        seek_time_delta = guess_time - last_time;
+        seek_time_delta = next.time - last.time;
         if (seek_time_delta < .000000001)
             seek_time_delta = .000000001;
-        last_time = low_guess_time = guess_time;
+        last.position = target + (sdir ? half_step : -half_step);
+        last.time = next.time;
+        low = next;
     }
     queue_append_finish(qa);
-    sk->commanded_pos = last_pos;
+    sk->commanded_pos = last.position;
     return steps;
 }
 
