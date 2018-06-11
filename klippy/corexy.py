@@ -134,11 +134,17 @@ class CoreXYKinematics:
     def move(self, print_time, move):
         if self.need_motor_enable:
             self._check_motor_enable(print_time, move)
+        axes_d = move.axes_d
+        cmove = self.cmove
         self.move_fill(
-            self.cmove, print_time,
+            cmove, print_time,
             move.accel_t, move.cruise_t, move.decel_t,
             move.start_pos[0], move.start_pos[1], move.start_pos[2],
-            move.axes_d[0], move.axes_d[1], move.axes_d[2],
+            axes_d[0], axes_d[1], axes_d[2],
             move.start_v, move.cruise_v, move.accel)
-        for stepper in self.steppers:
-            stepper.step_itersolve(self.cmove)
+        stepper_a, stepper_b, stepper_z = self.steppers
+        if axes_d[0] or axes_d[1]:
+            stepper_a.step_itersolve(cmove)
+            stepper_b.step_itersolve(cmove)
+        if axes_d[2]:
+            stepper_z.step_itersolve(cmove)
