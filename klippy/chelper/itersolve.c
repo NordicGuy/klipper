@@ -106,9 +106,11 @@ itersolve_find_step(struct stepper_kinematics *sk, struct move *m
     low.position -= target;
     high.position -= target;
     if (!high.position)
+        // The high range was a perfect guess for the next step
         return best_guess;
     int high_sign = signbit(high.position);
     if (high_sign == signbit(low.position))
+        // The target is not in the low/high range - return low range
         return (struct timepos){ low.time, target };
     for (;;) {
         double guess_time = ((low.time*high.position - high.time*low.position)
@@ -130,6 +132,7 @@ itersolve_find_step(struct stepper_kinematics *sk, struct move *m
     return best_guess;
 }
 
+// Generate step times for a stepper during a move
 int32_t __visible
 itersolve_gen_steps(struct stepper_kinematics *sk, struct move *m)
 {
@@ -164,8 +167,8 @@ itersolve_gen_steps(struct stepper_kinematics *sk, struct move *m)
             if (fabs(dist) < half_step + .000000001)
                 // Only change direction if going past midway point
                 goto seek_new_high_range;
-            if (low.time <= last.time) {
-                // Must reset "low" range to avoid finding same position
+            if (last.time >= low.time) {
+                // Must seek new low range to avoid re-finding previous time
                 high.time = (last.time + high.time) * .5;
                 high.position = calc_position(sk, m, high.time);
                 continue;
