@@ -17,12 +17,16 @@
  * Kinematic moves
  ****************************************************************/
 
+struct move_accel {
+    double c1, c2;
+};
+
 struct move {
     double print_time, move_t;
     double accel_t, cruise_t;
-    double start_v, cruise_v;
-    double half_accel;
     double cruise_start_d, decel_start_d;
+    double cruise_v;
+    struct move_accel accel, decel;
     struct coord start_pos, axes_r;
 };
 
@@ -42,15 +46,22 @@ move_fill(struct move *m, double print_time
           , double axes_d_x, double axes_d_y, double axes_d_z
           , double start_v, double cruise_v, double accel)
 {
+    // Setup velocity trapezoid
     m->print_time = print_time;
     m->move_t = accel_t + cruise_t + decel_t;
     m->accel_t = accel_t;
     m->cruise_t = cruise_t;
-    m->start_v = start_v;
-    m->cruise_v = cruise_v;
-    m->half_accel = .5 * accel;
     m->cruise_start_d = accel_t * .5 * (cruise_v + start_v);
     m->decel_start_d = m->cruise_start_d + cruise_t * cruise_v;
+
+    // Setup for accel/cruise/decel phases
+    m->cruise_v = cruise_v;
+    m->accel.c1 = start_v;
+    m->accel.c2 = .5 * accel;
+    m->decel.c1 = cruise_v;
+    m->decel.c2 = -m->accel.c2;
+
+    // Setup for move_get_coord()
     m->start_pos.x = start_pos_x;
     m->start_pos.y = start_pos_y;
     m->start_pos.z = start_pos_z;
@@ -61,18 +72,27 @@ move_fill(struct move *m, double print_time
     m->axes_r.z = axes_d_z * inv_move_d;
 }
 
+// Find the distance travel during acceleration/deceleration
+static double
+move_eval_accel(struct move_accel *ma, double move_time)
+{
+    return (ma->c1 + ma->c2 * move_time) * move_time;
+}
+
 // Return the distance moved given a time in a move
 static double
 move_get_distance(struct move *m, double move_time)
 {
-    if (move_time < m->accel_t)
-        return (m->start_v + move_time*m->half_accel) * move_time;
+    if (unlikely(move_time < m->accel_t))
+        // Acceleration phase of move
+        return move_eval_accel(&m->accel, move_time);
     move_time -= m->accel_t;
-    if (move_time < m->cruise_t)
+    if (likely(move_time < m->cruise_t))
+        // Cruising phase
         return m->cruise_start_d + m->cruise_v * move_time;
+    // Deceleration phase
     move_time -= m->cruise_t;
-    double avg_v = m->cruise_v - move_time*m->half_accel;
-    return m->decel_start_d + avg_v * move_time;
+    return m->decel_start_d + move_eval_accel(&m->decel, move_time);
 }
 
 // Return the XYZ coordinates given a time in a move
