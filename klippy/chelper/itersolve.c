@@ -113,7 +113,7 @@ move_fill(struct move *m, double print_time
 }
 
 // Find the distance travel during acceleration/deceleration
-static double
+static inline double
 move_eval_accel(struct move_accel *ma, double move_time)
 {
     double v = ma->c6;
@@ -126,7 +126,7 @@ move_eval_accel(struct move_accel *ma, double move_time)
 }
 
 // Return the distance moved given a time in a move
-double
+inline double
 move_get_distance(struct move *m, double move_time)
 {
     if (unlikely(move_time < m->accel_t))
