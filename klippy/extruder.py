@@ -164,14 +164,14 @@ class PrinterExtruder:
             self.stepper.motor_enable(print_time, 1)
             self.need_motor_enable = False
         axis_d = move.axes_d[3]
-        axis_r = abs(axis_d) / move.move_d
+        axis_r = axis_d / move.move_d
         accel = move.accel * axis_r
         start_v = move.start_v * axis_r
         cruise_v = move.cruise_v * axis_r
         accel_t, cruise_t, decel_t = move.accel_t, move.cruise_t, move.decel_t
 
         # Update for pressure advance
-        extra_accel_v = extra_decel_v = pressure_d = 0.
+        extra_accel_v = extra_decel_v = 0.
         start_pos = self.extrude_pos
         if (axis_d >= 0. and (move.axes_d[0] or move.axes_d[1])
             and self.pressure_advance):
@@ -199,7 +199,7 @@ class PrinterExtruder:
             self.cmove, print_time, accel_t, cruise_t, decel_t, start_pos,
             start_v, cruise_v, accel, extra_accel_v, extra_decel_v)
         self.stepper.step_itersolve(self.cmove)
-        self.extrude_pos = start_pos + axis_d + pressure_d
+        self.extrude_pos = start_pos + axis_d
     cmd_SET_PRESSURE_ADVANCE_help = "Set pressure advance parameters"
     def cmd_default_SET_PRESSURE_ADVANCE(self, params):
         extruder = self.printer.lookup_object('toolhead').get_extruder()
