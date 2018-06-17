@@ -11,9 +11,9 @@ GCONF_EN_PWM_MODE=1<<2
 GCONF_DIAG1_STALL=1<<8
 REG_GCONF=0x00
 REG_TCOOLTHRS=0x14
-REG_COOLCONF=0x6d
+REG_COOLCONF=0x6D
 REG_PWMCONF=0x70
-REG_CHOPCONF=0x6c
+REG_CHOPCONF=0x6C
 REG_IHOLD_IRUN=0x10
 REG_TPOWERDOWN=0x11
 REG_TPWMTHRS=0x13
@@ -42,7 +42,7 @@ class TMC2130:
         self.mcu.add_config_cmd(
             "config_spi oid=%d bus=%d pin=%s mode=%d rate=%d shutdown_msg=" % (
                 self.oid, 0, cs_pin_params['pin'], 3, 4000000))
-		# Calculate current	and populate IHOLD_IRUN			
+        # Calculate current	and populate IHOLD_IRUN			
         run_current = config.getfloat('run_current', above=0., maxval=2.)
         hold_current = config.getfloat('hold_current', run_current,
                                        above=0., maxval=2.)'
@@ -56,45 +56,43 @@ class TMC2130:
             ihold = self.current_bits(hold_current, sense_resistor, vsense)
         iholddelay = config.getint('driver_IHOLDDELAY', 8, minval=0, maxval=15)
         tpowerdown = config.getint('driver_TPOWERDOWN', 0, minval=0, maxval=255)
-        # Populate GCONF
-        en_pwm_mode = config.getboolean('stealthchop', False)
 		# Populate TPWMTHRS	
         sc_velocity = config.getfloat('stealthchop_threshold', 0., minval=0.)
         sc_threshold = self.velocity_to_clock(config, sc_velocity)
         # Populate TCOOLTHRS
-        coolstep_velocity = config.getfloat('coolstep_threshold', 0., minval=0.)
-        coolstep_threshold = self.velocity_to_clock(config, coolstep_velocity) 
+        cs_velocity = config.getfloat('coolstep_threshold', 0., minval=0.)
+        cs_threshold = self.velocity_to_clock(config, cs_velocity) 
         # Populate CHOPCONF
         interpolate = config.getboolean('interpolate', True)
         steps = {'256': 0, '128': 1, '64': 2, '32': 3, '16': 4,
                  '8': 5, '4': 6, '2': 7, '1': 8}
         self.mres = config.getchoice('microsteps', steps)
-        pwm_sync = config.getint('driver_PWM_SYNC', 0, minval=1, maxval=15)       
+        pwm_sync = config.getint('driver_PWM_SYNC', 0, minval=0, maxval=15)       
         blank_time_select = config.getint('driver_BLANK_TIME_SELECT', 1,
                                           minval=0, maxval=3)
-        chm = config.getint('driver_CHOPPER_MODE', 0, minval=0, maxval=1)
+        chm = config.getboolean('driver_CHOPPER_MODE', False)
         disfdcc = config.getboolean('driver_FAST_DECAY', False)
         rndtf = config.getboolean('driver_RANDOM_OFF_TIME', False)
         hend = config.getint('driver_HEND', 7, minval=0, maxval=15)
         hstrt = config.getint('driver_HSTRT', 0, minval=0, maxval=7)
         toff = config.getint('driver_TOFF', 4, minval=1, maxval=15)
         # Populate COOLCONF
-        sfilt = config.getint('driver_SG_FILTER', 0, minval=0, maxval=1)
+        sfilt = config.getboolean('driver_SG_FILTER', False)
         sgt = config.getint('driver_SGT', 0, minval=-64, maxval=63) & 0x7f
-        seimin = config.getint('driver_CURRENT_MIN', 0, minval=0, maxval= 1)
+        seimin = config.getboolean('driver_CURRENT_MIN', False)
         sedn = config.getint('driver_CURRENT_SPEED', 0, minval=0, maxval=3)
         semax = config.getint('driver_SGT_HYST', 0, minval=0, maxval=15)
         seup = config.getint('driver_CURRENT_STEP', 1, minval=0, maxval=3)
         semin = config.getint('driver_SGT_MIN', 0, minval=0, maxval=15)
         # Populate PWMCONF
         freewheel = config.getint('driver_STANDSTILL_MODE', 0, minval=0, maxval=3)
-        pwm_sym = config.getboolean('driver_SYMMETRIC_PWM', False)
+        pwm_sym = config.getboolean('driver_PWM_SYMM', False)
         pwm_scale = config.getboolean('driver_PWM_AUTOSCALE', True)
         pwm_freq = config.getint('driver_PWM_FREQ', 1, minval=0, maxval=3)
         pwm_grad = config.getint('driver_PWM_GRAD', 4, minval=0, maxval=255)
         pwm_ampl = config.getint('driver_PWM_AMPL', 128, minval=0, maxval=255)
         # configure GCONF
-        self.add_config_cmd(REG_GCONF, en_pwm_mode << 2)
+        self.add_config_cmd(REG_GCONF, ((sc_threshold > 0.) << 2)
         # configure IHOLD_IRUN
         self.add_config_cmd(REG_IHOLD_IRUN, ihold | (irun << 8) | (iholddelay << 16))
         # configure TPOWERDOWN
@@ -102,22 +100,19 @@ class TMC2130:
         # configure TPWMTHRS
         self.add_config_cmd(REG_TPWMTHRS, max(0, min(0xfffff, sc_threshold)))
 		# configure TCOOLTHRS
-        self.add_config_cmd(REG_TCOOLTHRS, coolstep_threshold)
+        self.add_config_cmd(REG_TCOOLTHRS, max(0, min(0xfffff, cs_threshold)))
         # configure CHOPCONF
-        self.add_config_cmd(
-            REG_CHOPCONF, toff | (hstrt << 4) | (hend << 7) | (disfdcc << 12) | (rndtf << 13) 
-            | (chm << 14) | (blank_time_select << 15) | (vsense << 17) | (pwm_sync << 20) 
-            | (self.mres << 24) | (interpolate << 28))
+        self.add_config_cmd(REG_CHOPCONF, toff | (hstrt << 4) | (hend << 7) | (disfdcc << 12) 
+                            | (rndtf << 13) | (chm << 14) | (blank_time_select << 15) 
+                            | (vsense << 17) | (pwm_sync << 20) | (self.mres << 24) | (interpolate << 28))
         # configure COOLCONF
-        self.add_config_cmd(
-            REG_COOLCONF, semin | (seup << 5) | (semax << 8) | (sedn << 13) | (seimin << 15) 
-            | (sgt << 16) | (sfilt << 24))
+        self.add_config_cmd(REG_COOLCONF, semin | (seup << 5) | (semax << 8) | (sedn << 13) 
+                            | (seimin << 15) | (sgt << 16) | (sfilt << 24))
         # configure PWMCONF
-        self.add_config_cmd(
-            REG_PWMCONF, pwm_ampl | (pwm_grad << 8) | (pwm_freq << 16) | (pwm_scale << 18) 
-            |(pwm_sym << 19) | (freewheel << 20))
+        self.add_config_cmd(REG_PWMCONF, pwm_ampl | (pwm_grad << 8) | (pwm_freq << 16) | (pwm_scale << 18) 
+                            | (pwm_sym << 19) | (freewheel << 20))
         # configure Linearity Correction
-        wave_factor = config.getfloat('linearity_correction', 0., minval=TMC_WAVE_FACTOR_MIN, maxval=TMC_WAVE_FACTOR_MAX)
+        wave_factor = config.getfloat('linearity_correction', 0., minval=1.005, maxval=1.3)
         self.set_wave(wave_factor, True)
         # Linearity Correction GCODE setup
         self.gcode = self.printer.lookup_object('gcode')
